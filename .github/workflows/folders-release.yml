@@ -35,9 +35,6 @@ jobs:
           registry-url: https://registry.npmjs.org
       # Trusted publishing (OIDC) needs npm 11.5.1 or later.
       - run: npm install --global npm@latest
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsx scripts/compile-referenced-projects.ts host-contracts
-      - run: pnpm exec vitest run packages/client/ui-workspace
       - name: Check the version
         id: version
         run: |
@@ -46,17 +43,24 @@ jobs:
           import { execFileSync } from 'node:child_process'
           const fork = JSON.parse(readFileSync('packages/client/ui-workspace/fork/manifest.json', 'utf8'))
           const upstream = JSON.parse(readFileSync('packages/client/ui-workspace/package.json', 'utf8'))
-          if (fork.engines?.dsh !== upstream.version) {
-            console.error(`engines.dsh is ${fork.engines?.dsh}, but this branch carries DSH ${upstream.version}`)
-            process.exit(1)
-          }
+          // A freshly cut branch still names the previous DSH release: nothing is confirmed yet.
+          const confirmed = fork.engines?.dsh === upstream.version
           let published = false
           try {
             published = execFileSync('npm', ['view', `${fork.name}@${fork.version}`, 'version'], { encoding: 'utf8' }).trim() !== ''
           } catch {}
-          appendFileSync(process.env.GITHUB_OUTPUT, `publish=${published ? 'false' : 'true'}\n`)
-          console.log(published ? `${fork.name}@${fork.version} is already on npm` : `publishing ${fork.name}@${fork.version}`)
+          const publish = confirmed && !published
+          appendFileSync(process.env.GITHUB_OUTPUT, `publish=${publish}\n`)
+          console.log(!confirmed
+            ? `skipped: engines.dsh is ${fork.engines?.dsh}, this branch carries DSH ${upstream.version}`
+            : published ? `skipped: ${fork.name}@${fork.version} is already on npm` : `publishing ${fork.name}@${fork.version}`)
           EOF
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm exec tsx scripts/compile-referenced-projects.ts host-contracts
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm exec vitest run packages/client/ui-workspace
       - name: Build
         if: steps.version.outputs.publish == 'true'
         id: build

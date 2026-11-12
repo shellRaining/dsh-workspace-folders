@@ -44,7 +44,7 @@ export interface FolderView extends WorkspaceFolderState {
 
 /** One folder dialog the menus asked for. */
 export type FolderDialogRequest =
-  | { readonly kind: 'create'; readonly workspacePath: string; readonly sessionId: SessionId | null }
+  | { readonly kind: 'create'; readonly workspaceId: string; readonly workspacePath: string; readonly sessionId: SessionId | null }
   | { readonly kind: 'rename'; readonly folder: WorkspaceFolder }
   | { readonly kind: 'delete'; readonly folder: WorkspaceFolder }
 
@@ -56,12 +56,14 @@ export interface FolderBrowserShare {
   readonly state: ObservableSnapshot<FolderView>
   /** Folder ids folded in this browser. */
   readonly collapsed: ObservableSnapshot<readonly string[]>
+  /** The folded folder ids, ignoring a malformed stored value. */
+  collapsedIds(): readonly string[]
   readonly dialog: ObservableSnapshot<FolderDialogRequest | null>
   readonly t: FolderTranslate
   setCollapsed(folderId: string, collapsed: boolean): void
   /** Move a Session into a folder (or out with null); applied at once, reverted with a notice on failure. */
   move(sessionId: SessionId, folderId: string | null): void
-  create(workspacePath: string, name: string, sessionId: SessionId | null): Promise<void>
+  create(request: Extract<FolderDialogRequest, { kind: 'create' }>, name: string): Promise<void>
   rename(folderId: string, name: string): Promise<void>
   remove(folderId: string): Promise<void>
   settleDialog(): void
@@ -110,14 +112,19 @@ export function foldersOf(folders: readonly WorkspaceFolder[], workspacePath: st
  * @param ctx - the workspace plugin's client context.
  * @returns the browser share.
  */
-export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
+export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspaceId: string) => void): FolderBrowserShare {
   ctx.effect(() => ctx.locale.register(FOLDER_NS, { zh, en }), 'workspace-folders: dictionaries')
   const t = ctx.locale.bind(FOLDER_NS)
   const state = createSnapshotStore<FolderView>({ phase: 'loading', folders: [], members: {} })
   const collapsed = createSnapshotStore<readonly string[]>([], { persist: { name: COLLAPSED_STORAGE_KEY } })
   const dialog = createSnapshotStore<FolderDialogRequest | null>(null)
   let api: FolderRemote | undefined
+  /** Advances on every Host request; only the latest request's answer is applied. */
   let revision = 0
+  const collapsedIds = (): readonly string[] => {
+    const value: unknown = collapsed.getSnapshot()
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+  }
 
   const accept = (value: WorkspaceFolderState): void => {
     state.set({ phase: 'ready', folders: value.folders, members: value.members })
@@ -133,14 +140,19 @@ export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
       if (state.getSnapshot().phase === 'loading') state.set({ ...state.getSnapshot(), phase: 'unavailable' })
     }
   }
+  const refreshQuietly = (): void => {
+    refresh().catch((error: unknown) => { console.warn('workspace folders: read failed', error) })
+  }
   const call = async (operation: (remote: FolderRemote) => Promise<RemoteResult<WorkspaceFolderState>>): Promise<void> => {
-    if (api === undefined) throw new Error(t('notice.unavailable'))
-    revision++
+    if (api === undefined) throw new FolderCallError('workspaceFolders/unavailable', t('notice.unavailable'))
+    const observed = ++revision
     const result = await operation(api)
     if (result.ok) {
-      accept(result.value)
+      if (observed === revision) accept(result.value)
       return
     }
+    // A refused change may come from a stale view, for example a folder deleted in another window.
+    refreshQuietly()
     throw new FolderCallError(result.error.code, result.error.message)
   }
 
@@ -163,25 +175,33 @@ export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
   ctx.inject(['remote.workspaceFolders'], (child) => {
     child.effect(() => {
       api = child.remote.workspaceFolders
-      refresh().catch((error: unknown) => { console.warn('workspace folders: read failed', error) })
-      return () => { api = undefined }
+      refreshQuietly()
+      return () => {
+        api = undefined
+        revision++
+        // Without the Host namespace the browser falls back to the official view.
+        state.set({ ...state.getSnapshot(), phase: 'loading' })
+      }
     }, 'workspace-folders: state')
   })
-  ctx.on('connection/reset', () => {
-    refresh().catch((error: unknown) => { console.warn('workspace folders: read failed', error) })
-  })
+  ctx.on('connection/reset', refreshQuietly)
 
-  const move = (sessionId: SessionId, folderId: string | null): void => {
+  /** Move a Session; with `notice`, confirm a menu move, whose row may leave the view. */
+  const move = (sessionId: SessionId, folderId: string | null, notice?: string): void => {
     const before = state.getSnapshot()
-    if (before.phase !== 'ready' || (before.members[sessionId] ?? null) === folderId) return
-    const members = folderId === null
-      ? Object.fromEntries(Object.entries(before.members).filter(([id]) => id !== sessionId))
-      : { ...before.members, [sessionId]: folderId }
-    state.set({ ...before, members })
-    call(remote => remote.move(sessionId, folderId)).catch((error: unknown) => {
+    const previous = before.members[sessionId] ?? null
+    if (before.phase !== 'ready' || previous === folderId) return
+    const withMember = (members: Readonly<Record<string, string>>, value: string | null): Record<string, string> => value === null
+      ? Object.fromEntries(Object.entries(members).filter(([id]) => id !== sessionId))
+      : { ...members, [sessionId]: value }
+    state.set({ ...before, members: withMember(before.members, folderId) })
+    call(remote => remote.move(sessionId, folderId)).then(() => {
+      if (notice !== undefined) ctx.contextMenus.notify(notice, true)
+    }).catch((error: unknown) => {
       console.warn('workspace folders: move rejected', error)
+      const current = state.getSnapshot()
+      if ((current.members[sessionId] ?? null) === folderId) state.set({ ...current, members: withMember(current.members, previous) })
       ctx.contextMenus.notify(t('notice.moveFailed'), false)
-      refresh().catch(() => {})
     })
   }
   const request = (next: FolderDialogRequest): void => { dialog.set(next) }
@@ -195,9 +215,9 @@ export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
   ctx.effect(() => ctx.contextMenus.register({
     id: 'workspace.folder', target: 'workspace', order: 150,
     observe: () => [state, ctx.locale],
-    resolve: ({ path }) => state.getSnapshot().phase !== 'ready' ? [] : [{
+    resolve: ({ workspaceId, path }) => state.getSnapshot().phase !== 'ready' ? [] : [{
       id: 'new-folder', label: t('folder.new'), icon: { key: ICON.new },
-      run: () => { request({ kind: 'create', workspacePath: path, sessionId: null }) },
+      run: () => { request({ kind: 'create', workspaceId, workspacePath: path, sessionId: null }) },
     }],
   }), 'workspace-folders: workspace menu')
   ctx.effect(() => ctx.contextMenus.register({
@@ -208,23 +228,22 @@ export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
       if (snapshot.phase !== 'ready') return []
       const workspace = ctx.workspaces.list.getSnapshot().items.find(item => item.sessionIds.includes(sessionId))
       if (workspace === undefined) return []
-      const current = snapshot.members[sessionId]
       const folders = foldersOf(snapshot.folders, workspace.path)
-      const inFolder = folders.some(folder => folder.id === current)
-      const targets = folders.filter(folder => folder.id !== current)
+      const current = folders.find(folder => folder.id === snapshot.members[sessionId])
+      // The current folder stays listed, disabled, so the submenu also says where the Session is.
       const children: MenuAction[] = [
-        ...targets.map(folder => ({
-          id: `folder-${folder.id}`, label: folder.name, icon: { key: ICON.folder },
-          run: () => { move(sessionId, folder.id) },
+        ...folders.map(folder => ({
+          id: `folder-${folder.id}`, label: folder.name, icon: { key: ICON.folder }, disabled: folder === current,
+          run: () => { move(sessionId, folder.id, t('notice.moved', { name: folder.name })) },
         })),
         {
-          id: 'new-folder', label: t('folder.newEllipsis'), icon: { key: ICON.new }, separatorBefore: targets.length > 0,
-          run: () => { request({ kind: 'create', workspacePath: workspace.path, sessionId }) },
+          id: 'new-folder', label: t('folder.newEllipsis'), icon: { key: ICON.new }, separatorBefore: folders.length > 0,
+          run: () => { request({ kind: 'create', workspaceId: workspace.workspaceId, workspacePath: workspace.path, sessionId }) },
         },
-        ...inFolder ? [{
-          id: 'remove-from-folder', label: t('menu.removeFromFolder'), icon: { key: ICON.out },
-          run: () => { move(sessionId, null) },
-        }] : [],
+        ...current === undefined ? [] : [{
+          id: 'remove-from-folder', label: t('menu.removeFromFolder'), icon: { key: ICON.out }, separatorBefore: true,
+          run: () => { move(sessionId, null, t('notice.movedOut', { name: current.name })) },
+        }],
       ]
       return [{ id: 'move-to-folder', label: t('menu.moveToFolder'), icon: { key: ICON.move }, children }]
     },
@@ -259,17 +278,22 @@ export function installWorkspaceFolders(ctx: Context): FolderBrowserShare {
     collapsed,
     dialog,
     t,
+    collapsedIds,
     setCollapsed: (folderId, folded) => {
-      const current = collapsed.getSnapshot()
+      const current = collapsedIds()
       if (current.includes(folderId) === folded) return
       collapsed.set(folded ? [...current, folderId] : current.filter(id => id !== folderId))
     },
-    move,
-    create: (workspacePath, name, sessionId) => call(remote => remote.create(workspacePath, name, sessionId)),
+    move: (sessionId, folderId) => { move(sessionId, folderId) },
+    create: async (request, name) => {
+      await call(remote => remote.create(request.workspacePath, name, request.sessionId))
+      // A folder made from a folded Workspace's menu would otherwise appear out of sight.
+      expandWorkspace(request.workspaceId)
+    },
     rename: (folderId, name) => call(remote => remote.rename(folderId, name)),
     remove: async (folderId) => {
       await call(remote => remote.remove(folderId))
-      const current = collapsed.getSnapshot()
+      const current = collapsedIds()
       if (current.includes(folderId)) collapsed.set(current.filter(id => id !== folderId))
     },
     settleDialog: () => { dialog.set(null) },
