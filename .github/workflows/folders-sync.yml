@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
+      # gh would otherwise address the upstream parent of this fork.
+      GH_REPO: ${{ github.repository }}
       LEFTHOOK: '0'
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:

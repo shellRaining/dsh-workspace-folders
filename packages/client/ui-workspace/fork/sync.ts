@@ -23,6 +23,8 @@ import { join, relative } from 'node:path'
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
 const PACKAGE = relative(root, join(import.meta.dirname, '..'))
 const UPSTREAM = 'https://github.com/deepseek-ai/deepseek-harness.git'
+/** This fork. gh would otherwise address the upstream parent of a fork clone. */
+const REPO = process.env.GITHUB_REPOSITORY ?? 'shellRaining/dsh-workspace-folders'
 const LABEL = 'folders-sync'
 const OWN_WORKFLOWS = new Set(['.github/workflows/folders-sync.yml', '.github/workflows/folders-release.yml'])
 /** Paths this fork changes; a release branch receives their diff against upstream. */
@@ -71,11 +73,11 @@ function check(): boolean {
 }
 
 function openIssue(title: string, body: string): void {
-  const open = JSON.parse(execFileSync('gh', ['issue', 'list', '--state', 'open', '--label', LABEL, '--json', 'title'], {
+  const open = JSON.parse(execFileSync('gh', ['issue', 'list', '--repo', REPO, '--state', 'open', '--label', LABEL, '--json', 'title'], {
     cwd: root, encoding: 'utf8',
   })) as Array<{ title: string }>
   if (open.some(issue => issue.title === title)) return
-  run('gh', ['issue', 'create', '--title', title, '--label', LABEL, '--body', body])
+  run('gh', ['issue', 'create', '--repo', REPO, '--title', title, '--label', LABEL, '--body', body])
 }
 
 function touchesPackage(commit: string): boolean {
@@ -160,11 +162,11 @@ function prepareRelease(): void {
 
 /** Keep only this fork's own workflows enabled. */
 function disableUpstreamWorkflows(): void {
-  const workflows = JSON.parse(execFileSync('gh', ['workflow', 'list', '--all', '--json', 'id,path,state'], {
+  const workflows = JSON.parse(execFileSync('gh', ['workflow', 'list', '--repo', REPO, '--all', '--json', 'id,path,state'], {
     cwd: root, encoding: 'utf8',
   })) as Array<{ id: number; path: string; state: string }>
   for (const workflow of workflows) {
-    if (workflow.state === 'active' && !OWN_WORKFLOWS.has(workflow.path)) run('gh', ['workflow', 'disable', String(workflow.id)])
+    if (workflow.state === 'active' && !OWN_WORKFLOWS.has(workflow.path)) run('gh', ['workflow', 'disable', '--repo', REPO, String(workflow.id)])
   }
 }
 
