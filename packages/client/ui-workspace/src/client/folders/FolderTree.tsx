@@ -122,9 +122,11 @@ function requiredWatermark(rows: readonly SessionNode[], current: SessionId | un
 export function useFolderTree(options: FolderTreeOptions): FolderTree {
   const { input, workspaces, archivedFilter, current, revealSessionId, drag, setDrag, committed, setSessionOrder, settleMotion } = options
   const share = input?.share
-  const view = useSyncExternalStore(share?.state.subscribe ?? idle, share?.state.getSnapshot ?? (() => EMPTY_VIEW))
+  const view = useSyncExternalStore(
+    fn => share?.state.subscribe(fn) ?? idle(), () => share?.state.getSnapshot() ?? EMPTY_VIEW,
+  )
   const storedCollapsed: unknown = useSyncExternalStore(
-    share?.collapsed.subscribe ?? idle, share?.collapsed.getSnapshot ?? (() => NO_COLLAPSED),
+    fn => share?.collapsed.subscribe(fn) ?? idle(), () => share?.collapsed.getSnapshot() ?? NO_COLLAPSED,
   )
   const collapsedIds = Array.isArray(storedCollapsed) ? storedCollapsed as readonly string[] : NO_COLLAPSED
   const [marks, setMarks] = useState<Readonly<Record<string, number>>>({})
@@ -334,7 +336,7 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       return dropTarget(group, `workspace:${group.key}`, null, true)
     },
     commitDrop: (group, order, source, over) => {
-      if (!active || share === undefined) return false
+      if (!active) return false
       const from = folderIn(group, source.sessionId)
       const to = folderIn(group, over.id)
       if (from === undefined && to === undefined) return false

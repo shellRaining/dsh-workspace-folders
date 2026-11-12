@@ -11,7 +11,7 @@ import css from '../rows/WorkspaceBrowser.module.css'
  * @returns the open dialog, or null.
  */
 export function FolderDialogs({ share }: { share: FolderBrowserShare }) {
-  const request = useSyncExternalStore(share.dialog.subscribe, share.dialog.getSnapshot)
+  const request = useSyncExternalStore(fn => share.dialog.subscribe(fn), () => share.dialog.getSnapshot())
   if (request === null) return null
   const key = request.kind === 'create' ? `create/${request.workspacePath}/${request.sessionId ?? ''}` : `${request.kind}/${request.folder.id}`
   return request.kind === 'delete'
@@ -43,7 +43,7 @@ function NameFolder({ request, share }: {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const composing = useRef(false)
-  const state = useSyncExternalStore(share.state.subscribe, share.state.getSnapshot)
+  const state = useSyncExternalStore(fn => share.state.subscribe(fn), () => share.state.getSnapshot())
   const workspacePath = renaming ? request.folder.workspacePath : request.workspacePath
   const name = draft.trim()
   const duplicate = name !== '' && foldersOf(state.folders, workspacePath)
