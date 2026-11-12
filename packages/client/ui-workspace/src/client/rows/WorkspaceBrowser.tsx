@@ -40,6 +40,8 @@ import {
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
+import { useFolderTree, type FolderTreeInput } from '../folders/FolderTree.tsx'
+import { FolderDialogs } from '../folders/FolderDialogs.tsx'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -292,6 +294,8 @@ type SessionTreeProps = Pick<
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
   onSessionRevealed: (sessionId: SessionId) => void
+  /** Workspace folders fork: the folder layer; absent renders the official tree. */
+  folders?: FolderTreeInput | undefined
 }
 
 /** The list-empty placeholder — a glyph over the text; the archived-only view names its filter and offers the way back. */
@@ -320,7 +324,7 @@ function SessionTree({
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
   setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, shortcuts,
+  revealSessionId, onSessionRevealed, shortcuts, folders,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -341,6 +345,10 @@ function SessionTree({
   const workspaceDropCommitted = useRef(false)
   const nativeDragActive = drag !== null || workspaceDrag !== null
   useNativeDragAcceptance(nativeDragActive)
+  const folderTree = useFolderTree({
+    input: folders, workspaces, archivedFilter: rowState.archivedFilter, current, revealSessionId, drag, setDrag,
+    committed: sessionDropCommitted, setSessionOrder, renderFactorySlot, useContextMenu, useContextMenuTarget, t,
+  })
   const currentGroup = current === undefined || !workspaceReady
     ? undefined
     : owningGroupKey(workspaces, current)
@@ -369,13 +377,13 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
-  const groups = useMemo(
+  const groups = folderTree.split(useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
     }),
     [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
-  )
+  ))
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
       if (groupExpansion[key] === false || (key === revealGroup && groupExpansion[key] !== true)) {
@@ -423,6 +431,7 @@ function SessionTree({
       ? ungroupedSessionIds
       : workspaces.find(workspace => workspace.workspaceId === activeDrag.accountKey)?.sessionIds
     if (accountSessionIds === undefined) return
+    if (folderTree.commitDrop(group, accountSessionIds, activeDrag, over)) return
     const renderedSessions = watermarkRows(group.sessions, sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE).rows
     const nextOrder = sessionDragOrder(accountSessionIds, renderedSessions, activeDrag, over)
     if (nextOrder !== undefined) setSessionOrder(activeDrag.accountKey, nextOrder)
@@ -480,6 +489,7 @@ function SessionTree({
     rowKeys.push(`workspace:${group.key}`)
     const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
     const sessions = visible.rows
+    rowKeys.push(...folderTree.rowKeys(group))
     for (const node of sessions) rowKeys.push(`session:${node.id}`)
     if (collapsed.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`)
     const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
@@ -568,13 +578,14 @@ function SessionTree({
             startSession(workspaceId)
           }}
           drag={workspaceDragProps}
+          sessionDrop={folderTree.headerDrop(group)}
         />
         {childRows.length > 0 && (
           <div role="group">
             {childRows}
           </div>
         )}
-        {sessions.map((node) => {
+        {folderTree.render(group, depth, sessions, (node) => {
         // Session drag never leaves its browser-local account, and pinned
         // rows reorder only within their leading pinned block.
           const sameGroupDrag = drag !== null && drag.accountKey === group.key
@@ -922,7 +933,7 @@ export function WorkspaceBrowser({
   closeAddWorkspace,
   setDirectoryBusy,
   renderSlot, renderFactorySlot, useContextMenuTarget, useContextMenu,
-  t,
+  t, folders,
 }: WorkspaceBrowserProps) {
   const home = useHostInfo(info => info.home)
   const shortcuts = useShortcuts(rows => rows)
@@ -1423,6 +1434,7 @@ export function WorkspaceBrowser({
                 onSessionRevealed={acknowledgeSessionReveal}
                 home={home}
                 t={t}
+                folders={folders === undefined ? undefined : { share: folders, orderBy }}
               />
             ))}
       </div>
@@ -1430,6 +1442,7 @@ export function WorkspaceBrowser({
       {workspaceActionRequest !== null && <WorkspaceDialogs key={`${workspaceActionRequest.action}/${workspaceActionRequest.workspaceId}`}
         request={workspaceActionRequest} workspaces={workspaces} renameWorkspace={renameWorkspace} deleteWorkspace={deleteWorkspace}
         settleWorkspaceAction={settleWorkspaceAction} t={t} />}
+      {folders !== undefined && <FolderDialogs share={folders} />}
     </div>
   )
 }
