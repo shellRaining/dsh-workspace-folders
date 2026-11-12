@@ -63,12 +63,23 @@ interface FolderTreeOptions extends Pick<WorkspaceBrowserProps, 'renderFactorySl
   /** SessionTree's guard against committing one drag twice. */
   committed: { current: boolean }
   setSessionOrder: (accountKey: string, order: readonly string[]) => void
+  /** Settle a user-driven row-count change without the entry fade, as SessionTree's own "Show more" does. */
+  settleMotion: () => void
 }
 
 interface FolderSection {
   readonly folder: WorkspaceFolder
   /** Every visible member in the group's sectioned order. */
   readonly rows: readonly SessionNode[]
+}
+
+/** The last split, reused while its inputs keep their identity. */
+interface SplitCache {
+  groups: GroupNode[]
+  view: FolderView
+  filter: ArchivedFilter
+  result: GroupNode[]
+  sections: Map<string, readonly FolderSection[]>
 }
 
 /** The folder layer's per-render API for SessionTree. */
@@ -103,23 +114,22 @@ function requiredWatermark(rows: readonly SessionNode[], current: SessionId | un
   return required
 }
 
-function sameIds(a: readonly SessionId[], b: readonly SessionId[]): boolean {
-  return a.length === b.length && a.every((id, index) => id === b[index])
-}
-
 /**
  * Folder layer state and rendering for one SessionTree.
  * @param options - SessionTree facts and setters.
  * @returns the per-render folder API.
  */
 export function useFolderTree(options: FolderTreeOptions): FolderTree {
-  const { input, workspaces, archivedFilter, current, revealSessionId, drag, setDrag, committed, setSessionOrder } = options
+  const { input, workspaces, archivedFilter, current, revealSessionId, drag, setDrag, committed, setSessionOrder, settleMotion } = options
   const share = input?.share
   const view = useSyncExternalStore(share?.state.subscribe ?? idle, share?.state.getSnapshot ?? (() => EMPTY_VIEW))
-  const collapsedIds = useSyncExternalStore(share?.collapsed.subscribe ?? idle, share?.collapsed.getSnapshot ?? (() => NO_COLLAPSED))
+  const storedCollapsed: unknown = useSyncExternalStore(
+    share?.collapsed.subscribe ?? idle, share?.collapsed.getSnapshot ?? (() => NO_COLLAPSED),
+  )
+  const collapsedIds = Array.isArray(storedCollapsed) ? storedCollapsed as readonly string[] : NO_COLLAPSED
   const [marks, setMarks] = useState<Readonly<Record<string, number>>>({})
   const [dropKey, setDropKey] = useState<string | null>(null)
-  const cache = useRef<{ groups: GroupNode[]; view: FolderView; filter: ArchivedFilter; result: GroupNode[] } | null>(null)
+  const cache = useRef<SplitCache | null>(null)
   const sections = useRef(new Map<string, readonly FolderSection[]>())
   const active = share !== undefined && view.phase === 'ready'
 
@@ -153,7 +163,10 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       return groups
     }
     const cached = cache.current
-    if (cached !== null && cached.groups === groups && cached.view === view && cached.filter === archivedFilter) return cached.result
+    if (cached !== null && cached.groups === groups && cached.view === view && cached.filter === archivedFilter) {
+      sections.current = cached.sections
+      return cached.result
+    }
     const next = new Map<string, readonly FolderSection[]>()
     const result = groups.map((group) => {
       if (group.workspaceId === undefined || group.cwd === undefined || !group.expanded) return group
@@ -173,14 +186,20 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       return { ...group, sessions: loose }
     })
     sections.current = next
-    cache.current = { groups, view, filter: archivedFilter, result }
+    cache.current = { groups, view, filter: archivedFilter, result, sections: next }
     return result
   }
 
   const layout = (section: FolderSection) => {
     const expanded = !collapsedIds.includes(section.folder.id)
     const baseline = Math.max(FOLDER_WATERMARK_BASE, requiredWatermark(section.rows, current, revealSessionId))
-    const watermark = Math.max(marks[section.folder.id] ?? FOLDER_WATERMARK_BASE, baseline)
+    const stored = marks[section.folder.id] ?? FOLDER_WATERMARK_BASE
+    // Rows raised into view by activity stay in view, as the Workspace watermark does.
+    if (expanded && baseline > stored) {
+      const id = section.folder.id
+      setMarks(value => baseline > (value[id] ?? FOLDER_WATERMARK_BASE) ? { ...value, [id]: baseline } : value)
+    }
+    const watermark = Math.max(stored, baseline)
     return { expanded, baseline, watermark, visible: watermarkRows(section.rows, watermark), folded: watermarkRows(section.rows, baseline) }
   }
 
@@ -206,11 +225,18 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
     className: dropKey === key && changes ? css.dropTarget : undefined,
     handlers: {
       onDragOver: (event: DragEvent<HTMLDivElement>) => {
+        // Releasing here must not commit the insertion marker last shown on a Session row.
+        setDrag(state => state === null || state.over === null ? state : { ...state, over: null })
+        if (!changes) {
+          // The Session is already here: refuse the drop, and keep the browser's
+          // document-wide acceptance from offering it anyway.
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'none'
+          return
+        }
         event.preventDefault()
         event.dataTransfer.dropEffect = 'move'
         if (dropKey !== key) setDropKey(key)
-        // Releasing here must not commit the insertion marker last shown on a Session row.
-        setDrag(state => state === null || state.over === null ? state : { ...state, over: null })
       },
       onDragLeave: (event: DragEvent<HTMLDivElement>) => {
         if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
@@ -247,7 +273,10 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
           active={current !== undefined && section.rows.some(row => row.id === current)}
           drop={drop}
           onToggle={() => {
-            if (expanded) setMarks(({ [folder.id]: _dropped, ...rest }) => rest)
+            if (expanded && marks[folder.id] !== undefined) {
+              setMarks(({ [folder.id]: _dropped, ...rest }) => rest)
+              settleMotion()
+            }
             share?.setCollapsed(folder.id, expanded)
           }}
           renderFactorySlot={options.renderFactorySlot}
@@ -263,6 +292,7 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
             data-row-key={`folder-overflow:${folder.id}`}
             aria-expanded={allShown}
             onClick={() => {
+              settleMotion()
               if (allShown) {
                 setMarks(({ [folder.id]: _dropped, ...rest }) => rest)
                 return
@@ -293,9 +323,11 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       }
       return keys
     },
+    // The selected blank New Session row stays first, above the folders; AnimatedRows reads positions from the DOM.
     render: (group, depth, rows, renderRow) => [
+      ...rows.filter(row => row.blank).map(renderRow),
       ...(sections.current.get(group.key) ?? []).map(section => renderSection(group, depth, section, renderRow)),
-      ...rows.map(renderRow),
+      ...rows.filter(row => !row.blank).map(renderRow),
     ],
     headerDrop: (group) => {
       if (!sameAccount(group) || drag === null || folderIn(group, drag.sessionId) === undefined) return undefined
@@ -312,8 +344,13 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       next.splice(at + (over.half === 'after' ? 1 : 0), 0, source.sessionId)
       if (from !== to) share.move(source.sessionId, to ?? null)
       else {
-        const inSection = (id: SessionId): boolean => folderIn(group, id) === to
-        if (sameIds(order.filter(inSection), next.filter(inSection))) return true
+        // Within one folder, as the official reorder: no change unless the row moves among the shown rows of its block.
+        const section = sections.current.get(group.key)?.find(candidate => candidate.folder.id === to)
+        const block = (section === undefined ? [] : layout(section).visible.rows).filter(row => row.pinned === source.pinned)
+        const sourceIndex = block.findIndex(row => row.id === source.sessionId)
+        const others = block.filter(row => row.id !== source.sessionId)
+        const insertAt = others.findIndex(row => row.id === over.id) + (over.half === 'after' ? 1 : 0)
+        if (sourceIndex === -1 || insertAt === sourceIndex) return true
       }
       setSessionOrder(group.key, next)
       return true
@@ -345,6 +382,7 @@ function FolderRow({
       data-row-key={`folder:${folder.id}`}
       role="treeitem"
       aria-expanded={expanded}
+      aria-description={t?.('folder.aria')}
       onClick={onToggle}
       {...getTriggerProps(target, { onKeyDown: (event) => {
         if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return

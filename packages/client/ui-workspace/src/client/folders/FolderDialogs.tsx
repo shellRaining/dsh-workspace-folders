@@ -21,8 +21,15 @@ export function FolderDialogs({ share }: { share: FolderBrowserShare }) {
 
 /** Message of a refused change, with the duplicate-name refusal in the reader's language. */
 function failureText(share: FolderBrowserShare, reason: unknown, name: string): string {
-  if (reason instanceof FolderCallError && reason.code === 'workspaceFolders/duplicate') return share.t('folder.duplicate', { name })
-  return reason instanceof Error ? reason.message : String(reason)
+  console.warn('workspace folders: change rejected', reason)
+  if (!(reason instanceof FolderCallError)) return share.t('notice.failed')
+  switch (reason.code) {
+    case 'workspaceFolders/duplicate': return share.t('folder.duplicate', { name })
+    case 'workspaceFolders/not-found': return share.t('notice.notFound')
+    case 'workspaceFolders/invalid': return share.t('notice.invalid')
+    case 'workspaceFolders/unavailable': return share.t('notice.unavailable')
+    default: return share.t('notice.failed')
+  }
 }
 
 /** Create or rename: one name field, checked against the Workspace's other folders. */
@@ -52,7 +59,7 @@ function NameFolder({ request, share }: {
     setError(null)
     const change = renaming
       ? share.rename(request.folder.id, name)
-      : share.create(request.workspacePath, name, request.sessionId)
+      : share.create(request, name)
     change.then(() => {
       setPending(false)
       share.settleDialog()

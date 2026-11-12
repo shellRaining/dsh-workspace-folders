@@ -16,7 +16,13 @@ export const zh = {
   'folder.actions.aria': '文件夹“{name}”的操作',
   'menu.moveToFolder': '移动到文件夹',
   'menu.removeFromFolder': '移出文件夹',
+  'folder.aria': '文件夹',
+  'notice.moved': '已移动到“{name}”',
+  'notice.movedOut': '已移出“{name}”',
   'notice.moveFailed': '无法移动会话，请重试',
+  'notice.notFound': '这个文件夹已不存在，列表已刷新。',
+  'notice.invalid': '名称不能为空，也不能过长。',
+  'notice.failed': '操作没有完成，请重试。',
   'notice.unavailable': '工作区文件夹暂时不可用，请稍后重试',
 } satisfies Record<string, string>
 
@@ -39,6 +45,12 @@ export const en = {
   'folder.actions.aria': 'Folder actions for {name}',
   'menu.moveToFolder': 'Move to folder',
   'menu.removeFromFolder': 'Remove from folder',
+  'folder.aria': 'Folder',
+  'notice.moved': 'Moved to “{name}”',
+  'notice.movedOut': 'Removed from “{name}”',
   'notice.moveFailed': 'Could not move the session. Try again.',
+  'notice.notFound': 'This folder no longer exists. The list has been refreshed.',
+  'notice.invalid': 'Names cannot be blank or too long.',
+  'notice.failed': 'The change did not go through. Try again.',
   'notice.unavailable': 'Workspace folders are unavailable. Try again later.',
 } satisfies Record<WorkspaceFolderKey, string>

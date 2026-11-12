@@ -115,8 +115,13 @@ const published = {
 writeFileSync(join(outDir, 'package.json'), `${JSON.stringify(published, null, 2)}\n`)
 
 if (values.pack) {
-  const tarball = execFileSync('npm', ['pack', '--json', '--pack-destination', dirname(outDir)], { cwd: outDir, encoding: 'utf8' })
-  const [entry] = JSON.parse(tarball) as Array<{ filename: string }>
-  if (entry !== undefined) console.log(join(dirname(outDir), entry.filename))
+  const output = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', dirname(outDir)], {
+    cwd: outDir, encoding: 'utf8',
+  })) as unknown
+  // npm 10 and 11 print an array of results; later versions key them by package name.
+  const results = (Array.isArray(output) ? output : Object.values(output as Record<string, unknown>)) as Array<{ filename?: string }>
+  const filename = results[0]?.filename
+  if (filename === undefined) throw new Error('npm pack reported no tarball')
+  console.log(join(dirname(outDir), filename))
 }
 console.log(`staged ${published.name}@${published.version} in ${outDir}`)

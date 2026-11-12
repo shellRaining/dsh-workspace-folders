@@ -348,6 +348,7 @@ function SessionTree({
   const folderTree = useFolderTree({
     input: folders, workspaces, archivedFilter: rowState.archivedFilter, current, revealSessionId, drag, setDrag,
     committed: sessionDropCommitted, setSessionOrder, renderFactorySlot, useContextMenu, useContextMenuTarget, t,
+    settleMotion: () => { setWatermarkMotionKey(key => key + 1) },
   })
   const currentGroup = current === undefined || !workspaceReady
     ? undefined

@@ -45,7 +45,10 @@ interface FolderStorage {
   open(spec: typeof folderDomain): Promise<FolderDomain>
 }
 
-/** Parsers the domain loader validates stored records with; a failing record is backed up and skipped. */
+/**
+ * Parsers the domain loader validates stored records with. A failing record
+ * fails the open loudly: folders are user data, so nothing is skipped.
+ */
 const storedFolder = {
   parse(raw: unknown): StoredFolder {
     if (typeof raw !== 'object' || raw === null) throw new TypeError('folder record is not an object')
@@ -67,7 +70,6 @@ const storedMember = {
 const folderDomain = {
   name: 'workspace_folders',
   version: 1,
-  invalidRecords: 'backup-and-skip',
   tables: {
     folders: { valueSchema: storedFolder },
     members: { valueSchema: storedMember },
@@ -114,6 +116,8 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
   static inject = ['typert', 'storageDomain']
 
   private readonly ready: Promise<FolderDomain>
+  /** Mutations run one at a time, so a uniqueness or existence check still holds when its write lands. */
+  private queue: Promise<unknown> = Promise.resolve()
 
   /** @param ctx - Host context carrying the storage domain facility. */
   constructor(ctx: Context) {
@@ -146,16 +150,17 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
    * @returns the state after the change.
    */
   @Remote
-  async create(workspacePath: string, name: string, sessionId: string | null): Promise<WorkspaceFolderState> {
-    const domain = await this.ready
+  create(workspacePath: string, name: string, sessionId: string | null): Promise<WorkspaceFolderState> {
     const path = identity(workspacePath, 'Workspace path')
     const title = folderName(name)
     const member = sessionId === null ? null : identity(sessionId, 'Session id')
-    this.assertUnique(domain, path, title, undefined)
-    const id = folderId()
-    await domain.table('folders').put(id, { workspacePath: path, name: title, createdAt: Date.now() })
-    if (member !== null) await domain.table('members').put(member, id)
-    return snapshot(domain)
+    return this.serial(async (domain) => {
+      this.assertUnique(domain, path, title, undefined)
+      const id = folderId()
+      await domain.table('folders').put(id, { workspacePath: path, name: title, createdAt: Date.now() })
+      if (member !== null) await domain.table('members').put(member, id)
+      return snapshot(domain)
+    })
   }
 
   /**
@@ -165,14 +170,15 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
    * @returns the state after the change.
    */
   @Remote
-  async rename(folderId: string, name: string): Promise<WorkspaceFolderState> {
-    const domain = await this.ready
-    const folder = domain.table('folders').get(folderId)
-    if (folder === undefined) throw notFound()
+  rename(folderId: string, name: string): Promise<WorkspaceFolderState> {
     const title = folderName(name)
-    this.assertUnique(domain, folder.workspacePath, title, folderId)
-    await domain.table('folders').put(folderId, { ...folder, name: title })
-    return snapshot(domain)
+    return this.serial(async (domain) => {
+      const folder = domain.table('folders').get(folderId)
+      if (folder === undefined) throw notFound()
+      this.assertUnique(domain, folder.workspacePath, title, folderId)
+      await domain.table('folders').put(folderId, { ...folder, name: title })
+      return snapshot(domain)
+    })
   }
 
   /**
@@ -181,13 +187,14 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
    * @returns the state after the change.
    */
   @Remote
-  async remove(folderId: string): Promise<WorkspaceFolderState> {
-    const domain = await this.ready
-    const members = domain.table('members')
-    const released = [...members.entries()].filter(([, owner]) => owner === folderId).map(([sessionId]) => sessionId)
-    await members.deleteMany(released)
-    await domain.table('folders').delete(folderId)
-    return snapshot(domain)
+  remove(folderId: string): Promise<WorkspaceFolderState> {
+    return this.serial(async (domain) => {
+      const members = domain.table('members')
+      const released = [...members.entries()].filter(([, owner]) => owner === folderId).map(([sessionId]) => sessionId)
+      await members.deleteMany(released)
+      await domain.table('folders').delete(folderId)
+      return snapshot(domain)
+    })
   }
 
   /**
@@ -197,16 +204,24 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
    * @returns the state after the change.
    */
   @Remote
-  async move(sessionId: string, folderId: string | null): Promise<WorkspaceFolderState> {
-    const domain = await this.ready
+  move(sessionId: string, folderId: string | null): Promise<WorkspaceFolderState> {
     const member = identity(sessionId, 'Session id')
-    if (folderId === null) {
-      await domain.table('members').delete(member)
-    } else {
-      if (domain.table('folders').get(folderId) === undefined) throw notFound()
-      await domain.table('members').put(member, folderId)
-    }
-    return snapshot(domain)
+    return this.serial(async (domain) => {
+      if (folderId === null) {
+        await domain.table('members').delete(member)
+      } else {
+        if (domain.table('folders').get(folderId) === undefined) throw notFound()
+        await domain.table('members').put(member, folderId)
+      }
+      return snapshot(domain)
+    })
+  }
+
+  /** Run one mutation after every earlier one settled. */
+  private serial<T>(change: (domain: FolderDomain) => Promise<T>): Promise<T> {
+    const next = this.queue.then(async () => await change(await this.ready))
+    this.queue = next.catch(() => undefined)
+    return next
   }
 
   private assertUnique(domain: FolderDomain, workspacePath: string, name: string, self: string | undefined): void {
