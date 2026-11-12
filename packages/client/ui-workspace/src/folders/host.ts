@@ -187,7 +187,7 @@ export default class WorkspaceFoldersController extends TypertRemoteService {
    * @returns the state after the change.
    */
   @Remote
-  remove(folderId: string): Promise<WorkspaceFolderState> {
+  delete(folderId: string): Promise<WorkspaceFolderState> {
     return this.serial(async (domain) => {
       const members = domain.table('members')
       const released = [...members.entries()].filter(([, owner]) => owner === folderId).map(([sessionId]) => sessionId)

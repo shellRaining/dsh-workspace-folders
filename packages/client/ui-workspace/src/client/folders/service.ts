@@ -69,12 +69,12 @@ export interface FolderBrowserShare {
   settleDialog(): void
 }
 
-/** The generated namespace this module calls. */
+/** The generated namespace this module calls. `remove` is reserved by the namespace service. */
 type FolderRemote = {
   read(): Promise<RemoteResult<WorkspaceFolderState>>
   create(workspacePath: string, name: string, sessionId: string | null): Promise<RemoteResult<WorkspaceFolderState>>
   rename(folderId: string, name: string): Promise<RemoteResult<WorkspaceFolderState>>
-  remove(folderId: string): Promise<RemoteResult<WorkspaceFolderState>>
+  delete(folderId: string): Promise<RemoteResult<WorkspaceFolderState>>
   move(sessionId: string, folderId: string | null): Promise<RemoteResult<WorkspaceFolderState>>
 }
 
@@ -292,7 +292,7 @@ export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspac
     },
     rename: (folderId, name) => call(remote => remote.rename(folderId, name)),
     remove: async (folderId) => {
-      await call(remote => remote.remove(folderId))
+      await call(remote => remote.delete(folderId))
       const current = collapsedIds()
       if (current.includes(folderId)) collapsed.set(current.filter(id => id !== folderId))
     },
