@@ -7,3 +7,7 @@
 
 /** Host plugin body — no host-side behavior for the workspace picker plugin. */
 export function apply(): void {}
+
+// Workspace folders fork: the Loader applies this default export instead of `apply`.
+export { default } from './folders/host.ts'
+export type { WorkspaceFolder, WorkspaceFolderState } from './folders/host.ts'

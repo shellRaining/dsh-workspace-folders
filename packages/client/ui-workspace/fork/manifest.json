@@ -1,0 +1,27 @@
+{
+  "name": "@shellraining/dsh-workspace-folders",
+  "version": "0.1.0",
+  "description": "在 DSH 侧栏的工作区里新建文件夹，给会话分组。替换官方工作区列表，其余行为与官方一致。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "workspace",
+    "folders"
+  ],
+  "author": "shellRaining",
+  "license": "MIT",
+  "homepage": "https://github.com/shellRaining/dsh-workspace-folders/tree/main/packages/client/ui-workspace/fork#readme",
+  "bugs": "https://github.com/shellRaining/dsh-workspace-folders/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shellRaining/dsh-workspace-folders.git",
+    "directory": "packages/client/ui-workspace"
+  },
+  "engines": {
+    "dsh": "0.2.2-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-typert-protocol": "workspace:*"
+  }
+}
