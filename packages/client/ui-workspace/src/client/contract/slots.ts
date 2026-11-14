@@ -56,6 +56,7 @@ import type { WorkspaceShortcutState } from '../shortcuts.ts'
 import type { StartSessionOptions } from '../navigation.ts'
 import type {} from './toast.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
+import type { FolderBrowserShare } from '../folders/service.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-context-menu/client' {
   interface ContextMenuTargetMap {
@@ -329,6 +330,8 @@ export type WorkspaceBrowserInjected = {
   unarchiveSession: (sessionId: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /** Workspace folders fork: the folder layer; absent renders the official browser. */
+  folders?: FolderBrowserShare | undefined
 }
 
 /** The browser's declared viewing store handle, shared with the row actions that write view state. */

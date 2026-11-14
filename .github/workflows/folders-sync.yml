@@ -1,0 +1,56 @@
+# Workspace folders fork: merge upstream master into main once a day and
+# prepare a release branch for each new DSH tag. The logic lives in
+# packages/client/ui-workspace/fork/sync.ts; its AGENTS.md explains the rules.
+name: folders-sync
+
+on:
+  schedule:
+    # 03:17 Asia/Shanghai.
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: folders-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # gh would otherwise address the upstream parent of this fork.
+      GH_REPO: ${{ github.repository }}
+      LEFTHOOK: '0'
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          # A deploy key, not GITHUB_TOKEN: merged upstream commits may change
+          # workflow files, which GITHUB_TOKEN is not allowed to push.
+          ssh-key: ${{ secrets.SYNC_DEPLOY_KEY }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Sync
+        run: node packages/client/ui-workspace/fork/sync.ts
+      - name: Upload package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: folders-package
+          path: packages/client/ui-workspace/fork/*.tgz
+          if-no-files-found: ignore
