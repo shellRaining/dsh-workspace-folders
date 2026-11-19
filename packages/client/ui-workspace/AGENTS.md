@@ -9,17 +9,17 @@
 - `fork/`：发布清单覆盖层 `manifest.json`、bundle patch、npm README、展示用的 locale 和图标、构建脚本 `build.ts`、同步脚本 `sync.ts`。
 - `src/folders/`：宿主端的 `workspaceFolders` Remote 和共享类型。
 - `src/client/folders/`：浏览器端的文件夹状态、菜单、对话框和树渲染。
-- `tsconfig.host.json`、本文件，以及仓库根目录的 `.github/workflows/folders-sync.yml`、`folders-release.yml`。
+- 本文件，以及仓库根目录的 `.github/workflows/folders-sync.yml`、`folders-release.yml`。
 
 上游文件里的接入点，改动保持在几行以内，新增的属性和注释都带 `Workspace folders fork` 字样：
 
 - `package.json`：`./typert`、`./remote`、`./folders` 三个导出和对应的 `files` 条目。Typert 生成器要求这些字段，包名和版本号保持上游原样。
-- `src/index.ts`：在空的 `apply` 后面加默认导出。上游测试要求 `apply` 继续存在且不抛错，Loader 优先使用默认导出。
+- `src/index.ts`：在空的 `apply` 后面加默认导出，并把上游的 `Config` 挂到默认导出上。上游测试要求 `apply` 和 `Config` 继续存在，Loader 优先使用默认导出，同步给浏览器的 Config 也从默认导出上读取。
 - `src/client/index.ts`：调用 `installWorkspaceFolders`，把 `folders` 放进浏览器的注入对象。
 - `src/client/contract/slots.ts`：`WorkspaceBrowserInjected` 的可选字段 `folders`。
 - `src/client/rows/WorkspaceBrowser.tsx`：`useFolderTree` 的调用、`split`、`commitDrop`、`rowKeys`、`headerDrop`、`render` 几处，以及 `FolderDialogs`。
 - `src/client/rows/Rows.tsx`：工作区行的可选属性 `sessionDrop`。
-- 仓库根目录 `tsconfig.host.json`：引用本包的 `tsconfig.host.json` 一行，让 Typert 用宿主配置分析宿主端。
+- `tsconfig.host.json`：`files` 加入 `src/folders/` 的两个文件，`references` 加入 `typert/protocol`。上游 master 在 0.2.2-rc.5 之后自带这个文件，并在仓库根目录的 `tsconfig.host.json` 里引用它，`main` 不再改根配置；从更早的标签切出的发布分支没有这个文件，仍按旧方式新建它，并在根配置里加一行引用。
 
 ## 改动规则
 
