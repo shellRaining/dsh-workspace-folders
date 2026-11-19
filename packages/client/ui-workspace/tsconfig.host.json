@@ -6,6 +6,7 @@
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
   },
   "files": [
+    "src/types.ts",
     "src/index.ts",
     "src/folders/host.ts",
     "src/folders/types.ts"
@@ -13,6 +14,9 @@
   "references": [
     {
       "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
     },
     {
       "path": "../../typert/protocol"
