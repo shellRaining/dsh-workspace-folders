@@ -7,10 +7,14 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { IconFolderCloseRegular, IconFolderOpenOutlineRegular, IconFolderOpenRegular, IconProjectAddOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconFolderCloseRegular, IconFolderOpenOutlineRegular, IconFolderOpenRegular, IconNewChatOutlineRegular, IconProjectAddOutlineRegular,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuAction } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceFolder, WorkspaceFolderState } from '../../folders/types.ts'
 import remote from '../../../lib/typert.remote-client.js'
@@ -36,11 +40,22 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
+/** A blank Session started from a folder menu; it joins the folder once it stops being blank. */
+export interface FolderDraft {
+  readonly sessionId: SessionId
+  readonly folderId: string
+}
+
 /** Folder state as the browser renders it. */
 export interface FolderView extends WorkspaceFolderState {
   /** `ready` once the Host answered; folders render only then. */
   readonly phase: 'loading' | 'ready' | 'unavailable'
+  /** The blank Session a folder's New session opened, shown inside that folder while it stays blank and selected. */
+  readonly draft?: FolderDraft
 }
+
+/** Open a Workspace's New session, naming the reused or created Session before it is selected. */
+export type OpenWorkspaceSession = (workspaceId: WorkspaceId, beforeOpen: (sessionId: SessionId) => void) => Promise<void>
 
 /** One folder dialog the menus asked for. */
 export type FolderDialogRequest =
@@ -93,6 +108,7 @@ const ICON = {
   move: 'workspaceFolders.move',
   folder: 'workspaceFolders.folder',
   out: 'workspaceFolders.out',
+  session: 'workspaceFolders.newSession',
 } as const
 
 /**
@@ -110,9 +126,13 @@ export function foldersOf(folders: readonly WorkspaceFolder[], workspacePath: st
 /**
  * Install the folder layer and return the share the browser region reads.
  * @param ctx - the workspace plugin's client context.
+ * @param expandWorkspace - unfold one Workspace group.
+ * @param openWorkspace - open a Workspace's New session, as the Workspace row's button does.
  * @returns the browser share.
  */
-export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspaceId: string) => void): FolderBrowserShare {
+export function installWorkspaceFolders(
+  ctx: Context, sessions: ISessions, expandWorkspace: (workspaceId: string) => void, openWorkspace: OpenWorkspaceSession,
+): FolderBrowserShare {
   ctx.effect(() => ctx.locale.register(FOLDER_NS, { zh, en }), 'workspace-folders: dictionaries')
   const t = ctx.locale.bind(FOLDER_NS)
   const state = createSnapshotStore<FolderView>({ phase: 'loading', folders: [], members: {} })
@@ -125,9 +145,19 @@ export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspac
     const value: unknown = collapsed.getSnapshot()
     return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
   }
+  const setCollapsedId = (folderId: string, folded: boolean): void => {
+    const current = collapsedIds()
+    if (current.includes(folderId) === folded) return
+    collapsed.set(folded ? [...current, folderId] : current.filter(id => id !== folderId))
+  }
 
   const accept = (value: WorkspaceFolderState): void => {
-    state.set({ phase: 'ready', folders: value.folders, members: value.members })
+    const { draft } = state.getSnapshot()
+    state.set({ phase: 'ready', folders: value.folders, members: value.members, ...draft === undefined ? {} : { draft } })
+  }
+  const setDraft = (draft: FolderDraft | undefined): void => {
+    const { draft: _previous, ...rest } = state.getSnapshot()
+    state.set(draft === undefined ? rest : { ...rest, draft })
   }
   const refresh = async (): Promise<void> => {
     if (api === undefined) return
@@ -206,10 +236,34 @@ export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspac
   }
   const request = (next: FolderDialogRequest): void => { dialog.set(next) }
 
+  // A folder's New session stays blank until its first prompt; it joins the
+  // folder then, and is dropped once another Session takes the main view.
+  const settleDraft = (): void => {
+    const { draft, folders } = state.getSnapshot()
+    if (draft === undefined) return
+    const summary = sessions.list.getSnapshot().byId[draft.sessionId]
+    if (summary === undefined) return
+    if (!summary.blank) {
+      // Membership first, so the row never leaves the folder in between.
+      if (folders.some(folder => folder.id === draft.folderId)) move(draft.sessionId, draft.folderId)
+      setDraft(undefined)
+      return
+    }
+    if ((summary.retainedBy.mainView ?? 0) === 0) setDraft(undefined)
+  }
+  ctx.effect(() => sessions.list.subscribe(settleDraft), 'workspace-folders: new session in folder')
+  const startInFolder = (workspaceId: WorkspaceId, folderId: string): void => {
+    expandWorkspace(workspaceId)
+    setCollapsedId(folderId, false)
+    openWorkspace(workspaceId, (sessionId) => { setDraft({ sessionId, folderId }) }).then(settleDraft).catch((error: unknown) => {
+      console.warn('workspace folders: new session failed', error)
+    })
+  }
+
   ctx.slots.inject('contextMenu.icon', function* () {
     for (const [key, Icon] of [
       [ICON.new, IconProjectAddOutlineRegular], [ICON.move, IconFolderOpenRegular],
-      [ICON.folder, IconFolderCloseRegular], [ICON.out, IconFolderOpenOutlineRegular],
+      [ICON.folder, IconFolderCloseRegular], [ICON.out, IconFolderOpenOutlineRegular], [ICON.session, IconNewChatOutlineRegular],
     ] as const) yield ctx.slots.register({ name: 'contextMenu.icon', key }, Icon)
   })
   ctx.effect(() => ctx.contextMenus.register({
@@ -251,6 +305,18 @@ export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspac
   const folderNamed = (folderId: string): WorkspaceFolder | undefined =>
     state.getSnapshot().folders.find(folder => folder.id === folderId)
   ctx.effect(() => ctx.contextMenus.register({
+    id: 'workspaceFolder.newSession', target: 'workspaceFolder', order: 50,
+    observe: () => [ctx.workspaces.list, ctx.locale],
+    resolve: ({ folderId, workspacePath }) => {
+      const workspace = ctx.workspaces.list.getSnapshot().items.find(item => item.path === workspacePath)
+      if (workspace === undefined || !ctx.remoteAccess.source('workspace', workspace.workspaceId, 'session/create').getSnapshot()) return []
+      return [{
+        id: 'new-session', label: t('folder.newSession'), icon: { key: ICON.session },
+        run: () => { startInFolder(workspace.workspaceId, folderId) },
+      }]
+    },
+  }), 'workspace-folders: folder new session')
+  ctx.effect(() => ctx.contextMenus.register({
     id: 'workspaceFolder.rename', target: 'workspaceFolder', order: 100,
     observe: () => [ctx.locale],
     resolve: ({ folderId }) => [{
@@ -279,11 +345,7 @@ export function installWorkspaceFolders(ctx: Context, expandWorkspace: (workspac
     dialog,
     t,
     collapsedIds,
-    setCollapsed: (folderId, folded) => {
-      const current = collapsedIds()
-      if (current.includes(folderId) === folded) return
-      collapsed.set(folded ? [...current, folderId] : current.filter(id => id !== folderId))
-    },
+    setCollapsed: setCollapsedId,
     move: (sessionId, folderId) => { move(sessionId, folderId) },
     create: async (request, name) => {
       await call(remote => remote.create(request.workspacePath, name, request.sessionId))
