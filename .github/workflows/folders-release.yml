@@ -1,0 +1,71 @@
+# Workspace folders fork: publish @shellraining/dsh-workspace-folders from a
+# release branch after its version bump. A version already on npm is skipped;
+# engines.dsh must name the DSH release the branch was cut from.
+name: folders-release
+
+on:
+  push:
+    branches: ['release/**']
+    paths: ['packages/client/ui-workspace/fork/manifest.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: folders-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LEFTHOOK: '0'
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later.
+      - run: npm install --global npm@latest
+      - name: Check the version
+        id: version
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFileSync, appendFileSync } from 'node:fs'
+          import { execFileSync } from 'node:child_process'
+          const fork = JSON.parse(readFileSync('packages/client/ui-workspace/fork/manifest.json', 'utf8'))
+          const upstream = JSON.parse(readFileSync('packages/client/ui-workspace/package.json', 'utf8'))
+          // A freshly cut branch still names the previous DSH release: nothing is confirmed yet.
+          const confirmed = fork.engines?.dsh === upstream.version
+          let published = false
+          try {
+            published = execFileSync('npm', ['view', `${fork.name}@${fork.version}`, 'version'], { encoding: 'utf8' }).trim() !== ''
+          } catch {}
+          const publish = confirmed && !published
+          appendFileSync(process.env.GITHUB_OUTPUT, `publish=${publish}\n`)
+          console.log(!confirmed
+            ? `skipped: engines.dsh is ${fork.engines?.dsh}, this branch carries DSH ${upstream.version}`
+            : published ? `skipped: ${fork.name}@${fork.version} is already on npm` : `publishing ${fork.name}@${fork.version}`)
+          EOF
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm exec tsx scripts/compile-referenced-projects.ts host-contracts
+      - if: steps.version.outputs.publish == 'true'
+        run: pnpm exec vitest run packages/client/ui-workspace
+      - name: Build
+        if: steps.version.outputs.publish == 'true'
+        id: build
+        run: |
+          tarball=$(node packages/client/ui-workspace/fork/build.ts --pack | grep '\.tgz$')
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        if: steps.version.outputs.publish == 'true'
+        run: npm publish "${{ steps.build.outputs.tarball }}" --provenance --access public

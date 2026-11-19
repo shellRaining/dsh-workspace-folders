@@ -1,0 +1,16 @@
+/* Workspace folder layer. Rows reuse the Workspace row and Session row
+   styles; this file adds only the section rhythm and the drop highlight. */
+
+.section > * + * {
+  margin-top: 2px;
+}
+
+.section > .overflow {
+  margin-top: 0;
+}
+
+/* A Workspace or folder row that takes the dragged Session when released. */
+.dropTarget {
+  background-color: var(--dsw-alias-interactive-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary);
+}
