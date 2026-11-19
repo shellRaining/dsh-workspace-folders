@@ -30,6 +30,7 @@ dsh plugin --profile <profile> add @shellraining/dsh-workspace-folders
 | --- | --- |
 | 0.1.0 | 0.2.2-rc.2 |
 | 0.1.1 | 0.2.2-rc.3 |
+| 0.1.2 | 0.2.2-rc.5 |
 
 ## 数据
 

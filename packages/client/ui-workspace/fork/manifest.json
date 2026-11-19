@@ -1,6 +1,6 @@
 {
   "name": "@shellraining/dsh-workspace-folders",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "在 DSH 侧栏的工作区里新建文件夹，给会话分组。替换官方工作区列表，其余行为与官方一致。",
   "keywords": [
     "deepseek-harness",
@@ -19,7 +19,7 @@
     "directory": "packages/client/ui-workspace"
   },
   "engines": {
-    "dsh": "0.2.2-rc.3"
+    "dsh": "0.2.2-rc.5"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-typert-protocol": "workspace:*",
