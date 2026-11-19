@@ -96,21 +96,25 @@ export interface FolderTree {
   commitDrop(group: GroupNode, order: readonly SessionId[], drag: SessionDrag, over: NonNullable<SessionDrag['over']>): boolean
 }
 
-/** Rows within the watermark, and how many it hides. */
+/** Rows within the watermark, and how many it hides; a blank New session row always shows and is not counted. */
 function watermarkRows(rows: readonly SessionNode[], watermark: number): { rows: readonly SessionNode[]; hiddenCount: number } {
-  const shown = rows.slice(0, watermark)
+  let count = 0
+  const shown = rows.filter(row => row.blank || ++count <= watermark)
   return { rows: shown, hiddenCount: rows.length - shown.length }
 }
 
 /** Smallest watermark showing every attention-bearing row within the automatic maximum, and the reveal target. */
 function requiredWatermark(rows: readonly SessionNode[], current: SessionId | undefined, reveal: SessionId | undefined): number {
   let required = 0
-  rows.forEach((row, index) => {
-    const attention = index < FOLDER_WATERMARK_AUTO_MAX && (
+  let index = 0
+  for (const row of rows) {
+    if (row.blank) continue
+    index += 1
+    const attention = index <= FOLDER_WATERMARK_AUTO_MAX && (
       row.running || row.runningSubagentCount > 0 || row.pendingInteraction !== undefined || row.completed || row.id === current
     )
-    if (attention || row.id === reveal) required = index + 1
-  })
+    if (attention || row.id === reveal) required = index
+  }
   return required
 }
 
@@ -153,7 +157,7 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
     : view.folders.filter(folder => folder.workspacePath === group.cwd).map(folder => folder.id))
   /** The folder of `group` holding a Session, by the rendered state. */
   const folderIn = (group: GroupNode, sessionId: SessionId): string | undefined => {
-    const folderId = view.members[sessionId]
+    const folderId = view.draft?.sessionId === sessionId ? view.draft.folderId : view.members[sessionId]
     return folderId !== undefined && folderIdsOf(group).has(folderId) ? folderId : undefined
   }
   const orderOf = (group: GroupNode): readonly SessionId[] | undefined =>
@@ -177,7 +181,11 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       const buckets = new Map<string, SessionNode[]>(folders.map(folder => [folder.id, []]))
       const loose: SessionNode[] = []
       for (const session of group.sessions) {
-        const bucket = session.blank ? undefined : buckets.get(view.members[session.id] ?? '')
+        // Only a folder's own New session draft enters a folder while blank.
+        const folderId = session.blank
+          ? (view.draft?.sessionId === session.id ? view.draft.folderId : undefined)
+          : view.members[session.id]
+        const bucket = folderId === undefined ? undefined : buckets.get(folderId)
         if (bucket === undefined) loose.push(session)
         else bucket.push(session)
       }
@@ -267,7 +275,9 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
         key={`folder:${folder.id}`}
         role="group"
         className={css.section}
-        style={{ '--dsh-workspace-indent': `${(depth + 1) * 12}px` } as CSSProperties}
+        // One step deeper than the Workspace by a Session row's leading slot and label gap, so the
+        // folder icon lines up with the titles of the Sessions outside folders.
+        style={{ '--dsh-workspace-indent': `calc(${depth * 12}px + 16px + var(--dsh-sidebar-label-gap))` } as CSSProperties}
       >
         <FolderRow
           folder={folder}

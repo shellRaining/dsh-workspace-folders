@@ -310,7 +310,8 @@ export function apply(ctx: Context): void {
     dismissToast: () => { rowToast.set(null) },
   })
   const workspaceActionRequest = createSnapshotStore<WorkspaceActionRequest | null>(null)
-  const folders = installWorkspaceFolders(ctx, (workspaceId) => { viewInstance.actions.setGroupExpanded(workspaceId, true) })
+  const folders = installWorkspaceFolders(ctx, sessions, (workspaceId) => { viewInstance.actions.setGroupExpanded(workspaceId, true) },
+    (workspaceId, beforeOpen) => uiWorkspace.openWorkspace(workspaceId, beforeOpen))
   const requestWorkspaceAction = (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete'): void => {
     const workspace = workspaces.list.getSnapshot().items.find(row => row.workspaceId === workspaceId)
     if (workspace === undefined || !ctx.remoteAccess.source('workspace', workspaceId, `workspace/${action}`).getSnapshot()) return
