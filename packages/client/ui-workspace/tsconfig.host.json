@@ -7,7 +7,9 @@
   },
   "files": [
     "src/types.ts",
-    "src/index.ts"
+    "src/index.ts",
+    "src/folders/host.ts",
+    "src/folders/types.ts"
   ],
   "references": [
     {
@@ -15,6 +17,9 @@
     },
     {
       "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../typert/protocol"
     }
   ]
 }

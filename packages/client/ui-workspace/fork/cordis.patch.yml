@@ -1,0 +1,8 @@
+# 停用官方工作区列表，在同一位置换上带文件夹的 fork。
+# 停用或卸载本插件后，官方工作区列表随之恢复。
+- id: ui-workspace
+  disabled: true
+
+- insert:
+    - id: ui-workspace-folders
+      name: '@shellraining/dsh-workspace-folders'

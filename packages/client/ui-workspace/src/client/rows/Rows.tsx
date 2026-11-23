@@ -24,6 +24,7 @@ import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionDragType, WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
+import type { RowDropTarget } from '../folders/FolderTree.tsx'
 import css from './Rows.module.css'
 
 /** Sidebar-owned layout values needed by row copies mounted outside the sidebar. */
@@ -140,6 +141,8 @@ type ProjectRowItemProps = {
   onCreate: (workspaceId: WorkspaceId) => void
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
+  /** Workspace folders fork: drop target while a Session from one of this Workspace's folders is dragged. */
+  sessionDrop?: RowDropTarget | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
   home?: string | undefined
   t: RowTranslate
@@ -193,7 +196,7 @@ function WorkspaceProjectRow({ workspaceId, ...props }: ProjectRowItemProps & { 
 
 function ProjectRow({
   group, containsCurrentDescendant = false, onToggle, drag: offeredDrag, home, newShortcut, t, actions,
-  renderFactorySlot, useContextMenuTarget, useContextMenu,
+  renderFactorySlot, useContextMenuTarget, useContextMenu, sessionDrop,
 }: Omit<ProjectRowItemProps, 'onCreate'> & { actions: ProjectRowActions }) {
   const { getTriggerProps } = useContextMenu()
   const drag = actions.reorder ? offeredDrag : undefined
@@ -208,12 +211,13 @@ function ProjectRow({
     ? { workspaceId: row.workspaceId, path: row.cwd } : undefined
   const ownRow = (
     <div
-      className={clsx(css.projectRow, menuOpen && css.menuOpen)}
+      className={clsx(css.projectRow, menuOpen && css.menuOpen, sessionDrop?.className)}
       data-row-key={`workspace:${group.key}`}
       role="treeitem"
       aria-expanded={row.expanded}
       onClick={onToggle}
       {...getTriggerProps(workspaceMenuTarget === undefined ? undefined : { kind: 'workspace', value: { ...workspaceMenuTarget, displayTitle: label } })}
+      {...sessionDrop?.handlers}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
         ? undefined
