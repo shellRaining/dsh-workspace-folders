@@ -37,10 +37,12 @@ jobs:
           # workflow files, which GITHUB_TOKEN is not allowed to push.
           ssh-key: ${{ secrets.SYNC_DEPLOY_KEY }}
       - uses: pnpm/action-setup@v4
+      # No `cache: pnpm`: sync.ts only runs `pnpm install` when upstream has new
+      # commits or a release branch is cut. On the other days the pnpm store
+      # does not exist and setup-node's post step fails the whole run.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
       - name: Configure git
         run: |
           git config user.name 'github-actions[bot]'
