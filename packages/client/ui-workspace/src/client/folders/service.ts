@@ -78,6 +78,10 @@ export interface FolderBrowserShare {
   setCollapsed(folderId: string, collapsed: boolean): void
   /** Move a Session into a folder (or out with null); applied at once, reverted with a notice on failure. */
   move(sessionId: SessionId, folderId: string | null): void
+  /** Open the Workspace's New session inside a folder, unfolding the Workspace and the folder; it joins the folder at its first prompt. */
+  startSession(workspaceId: WorkspaceId, folderId: string): void
+  /** Drop the pending folder New session, so its blank Session renders and stays outside every folder. */
+  clearDraft(): void
   create(request: Extract<FolderDialogRequest, { kind: 'create' }>, name: string): Promise<void>
   rename(folderId: string, name: string): Promise<void>
   remove(folderId: string): Promise<void>
@@ -347,6 +351,8 @@ export function installWorkspaceFolders(
     collapsedIds,
     setCollapsed: setCollapsedId,
     move: (sessionId, folderId) => { move(sessionId, folderId) },
+    startSession: startInFolder,
+    clearDraft: () => { if (state.getSnapshot().draft !== undefined) setDraft(undefined) },
     create: async (request, name) => {
       await call(remote => remote.create(request.workspacePath, name, request.sessionId))
       // A folder made from a folded Workspace's menu would otherwise appear out of sight.

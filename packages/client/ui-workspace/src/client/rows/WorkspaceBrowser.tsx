@@ -347,7 +347,7 @@ function SessionTree({
   useNativeDragAcceptance(nativeDragActive)
   const folderTree = useFolderTree({
     input: folders, workspaces, archivedFilter: rowState.archivedFilter, current, revealSessionId, drag, setDrag,
-    committed: sessionDropCommitted, setSessionOrder, renderFactorySlot, useContextMenu, useContextMenuTarget, t,
+    committed: sessionDropCommitted, setSessionOrder, renderFactorySlot, useContextMenu, useContextMenuTarget, useWorkspaceAccess, t,
     settleMotion: () => { setWatermarkMotionKey(key => key + 1) },
   })
   const currentGroup = current === undefined || !workspaceReady
@@ -576,6 +576,8 @@ function SessionTree({
           }}
           onCreate={(workspaceId) => {
             setGroupExpanded(group.key, true)
+            // Workspace folders fork: this button starts outside every folder.
+            folderTree.leaveDraft()
             startSession(workspaceId)
           }}
           drag={workspaceDragProps}

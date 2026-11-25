@@ -17,7 +17,7 @@
 - `src/index.ts`：在空的 `apply` 后面加默认导出，并把上游的 `Config` 挂到默认导出上。上游测试要求 `apply` 和 `Config` 继续存在，Loader 优先使用默认导出，同步给浏览器的 Config 也从默认导出上读取。
 - `src/client/index.ts`：调用 `installWorkspaceFolders`，把 `folders` 放进浏览器的注入对象。
 - `src/client/contract/slots.ts`：`WorkspaceBrowserInjected` 的可选字段 `folders`。
-- `src/client/rows/WorkspaceBrowser.tsx`：`useFolderTree` 的调用、`split`、`commitDrop`、`rowKeys`、`headerDrop`、`render` 几处，以及 `FolderDialogs`。
+- `src/client/rows/WorkspaceBrowser.tsx`：`useFolderTree` 的调用、`split`、`commitDrop`、`rowKeys`、`headerDrop`、`render`、工作区行 `onCreate` 里的 `leaveDraft` 几处，以及 `FolderDialogs`。
 - `src/client/rows/Rows.tsx`：工作区行的可选属性 `sessionDrop`。
 - `tsconfig.host.json`：`files` 加入 `src/folders/` 的两个文件，`references` 加入 `typert/protocol`。上游 master 在 0.2.2-rc.5 之后自带这个文件，并在仓库根目录的 `tsconfig.host.json` 里引用它，`main` 不再改根配置；从更早的标签切出的发布分支没有这个文件，仍按旧方式新建它，并在根配置里加一行引用。
 
@@ -59,7 +59,7 @@ pnpm exec vitest run packages/client/ui-workspace
 node packages/client/ui-workspace/fork/build.ts --out ~/.local/share/dsh-workspace-folders/package
 ```
 
-profile 的 `package.json` 写 npm 版本号，`pnpm-workspace.yaml` 的 `overrides` 写 `link:` 到上面的目录，然后在 profile 里执行 `dsh plugin --profile <名称> install`。宿主端改动要重启 DSH 才生效。
+profile 的 `package.json` 写 npm 版本号，`pnpm-workspace.yaml` 的 `overrides` 写 `link:` 到上面的目录，然后在 profile 里执行 `dsh plugin --profile <名称> install`。`desktop` profile 只能用桌面端自带的 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` 执行这条命令，其他 `dsh` 会拒绝管理它。宿主端改动要重启 DSH 才生效。
 
 ## 发布
 
