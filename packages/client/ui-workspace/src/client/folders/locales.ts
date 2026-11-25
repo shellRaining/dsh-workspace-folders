@@ -4,6 +4,7 @@
 export const zh = {
   'folder.new': '新建文件夹',
   'folder.newSession': '新建会话',
+  'folder.newSession.aria': '在文件夹“{name}”中新建会话',
   'folder.newEllipsis': '新建文件夹…',
   'folder.create': '创建',
   'folder.create.desc': '文件夹只用于整理侧栏，不会在磁盘上创建目录。',
@@ -34,6 +35,7 @@ export type WorkspaceFolderKey = keyof typeof zh
 export const en = {
   'folder.new': 'New folder',
   'folder.newSession': 'New session',
+  'folder.newSession.aria': 'New session in folder {name}',
   'folder.newEllipsis': 'New folder…',
   'folder.create': 'Create',
   'folder.create.desc': 'Folders only organize the sidebar. No directory is created on disk.',

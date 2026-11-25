@@ -10,8 +10,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, Dispatch, DragEvent, HTMLAttributes, ReactNode, SetStateAction } from 'react'
 import clsx from 'clsx'
-import { IconFolderCloseRegular, IconFolderOpenRegular, IconTriangleRightFillRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import {
+  IconFolderCloseRegular, IconFolderOpenRegular, IconNewChatOutlineRegular, IconTriangleRightFillRegular, Tooltip,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy } from '../tree.ts'
@@ -51,7 +53,9 @@ export interface RowDropTarget {
 }
 
 /** SessionTree facts the folder layer reads and the setters it drives. */
-interface FolderTreeOptions extends Pick<WorkspaceBrowserProps, 'renderFactorySlot' | 'useContextMenu' | 'useContextMenuTarget' | 't'> {
+interface FolderTreeOptions extends Pick<
+  WorkspaceBrowserProps, 'renderFactorySlot' | 'useContextMenu' | 'useContextMenuTarget' | 'useWorkspaceAccess' | 't'
+> {
   input: FolderTreeInput | undefined
   /** Workspaces with the browser-projected complete Session order. */
   workspaces: readonly WorkspaceView[]
@@ -69,6 +73,8 @@ interface FolderTreeOptions extends Pick<WorkspaceBrowserProps, 'renderFactorySl
 
 interface FolderSection {
   readonly folder: WorkspaceFolder
+  /** The Workspace whose group holds the folder. */
+  readonly workspaceId: WorkspaceId
   /** Every visible member in the group's sectioned order. */
   readonly rows: readonly SessionNode[]
 }
@@ -94,6 +100,8 @@ export interface FolderTree {
   headerDrop(group: GroupNode): RowDropTarget | undefined
   /** Apply a between-rows drop that involves a folder member; false leaves the drop to the official order. */
   commitDrop(group: GroupNode, order: readonly SessionId[], drag: SessionDrag, over: NonNullable<SessionDrag['over']>): boolean
+  /** The Workspace row's New session opens outside every folder: drop a pending folder New session. */
+  leaveDraft(): void
 }
 
 /** Rows within the watermark, and how many it hides; a blank New session row always shows and is not counted. */
@@ -175,7 +183,8 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
     }
     const next = new Map<string, readonly FolderSection[]>()
     const result = groups.map((group) => {
-      if (group.workspaceId === undefined || group.cwd === undefined || !group.expanded) return group
+      const { workspaceId } = group
+      if (workspaceId === undefined || group.cwd === undefined || !group.expanded) return group
       const folders = foldersOf(view.folders, group.cwd)
       if (folders.length === 0) return group
       const buckets = new Map<string, SessionNode[]>(folders.map(folder => [folder.id, []]))
@@ -190,7 +199,7 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
         else bucket.push(session)
       }
       next.set(group.key, folders
-        .map(folder => ({ folder, rows: buckets.get(folder.id) ?? [] }))
+        .map(folder => ({ folder, workspaceId, rows: buckets.get(folder.id) ?? [] }))
         // The archived-only view lists archives, so a folder without one is dropped like a Workspace.
         .filter(section => archivedFilter !== 'only' || section.rows.length > 0))
       return { ...group, sessions: loose }
@@ -281,6 +290,7 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       >
         <FolderRow
           folder={folder}
+          workspaceId={section.workspaceId}
           expanded={expanded}
           active={current !== undefined && section.rows.some(row => row.id === current)}
           drop={drop}
@@ -291,9 +301,12 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
             }
             share?.setCollapsed(folder.id, expanded)
           }}
+          onCreate={() => { share?.startSession(section.workspaceId, folder.id) }}
+          createLabel={options.t('actions.newSession')}
           renderFactorySlot={options.renderFactorySlot}
           useContextMenu={options.useContextMenu}
           useContextMenuTarget={options.useContextMenuTarget}
+          useWorkspaceAccess={options.useWorkspaceAccess}
           t={share?.t}
         />
         {expanded && visible.rows.map(renderRow)}
@@ -367,22 +380,34 @@ export function useFolderTree(options: FolderTreeOptions): FolderTree {
       setSessionOrder(group.key, next)
       return true
     },
+    leaveDraft: () => { share?.clearDraft() },
   }
 }
 
-/** One folder header: the Workspace row's look one level deeper, with its own menu and drop target. */
+/**
+ * One folder header: the Workspace row's look one level deeper, with its own menu and drop target.
+ * Hover shows the menu button and, while the Workspace allows `session/create`, a New session
+ * button that starts the Session inside this folder.
+ */
 function FolderRow({
-  folder, expanded, active, drop, onToggle, renderFactorySlot, useContextMenu, useContextMenuTarget, t,
-}: Pick<WorkspaceBrowserProps, 'renderFactorySlot' | 'useContextMenu' | 'useContextMenuTarget'> & {
+  folder, workspaceId, expanded, active, drop, onToggle, onCreate, createLabel,
+  renderFactorySlot, useContextMenu, useContextMenuTarget, useWorkspaceAccess, t,
+}: Pick<WorkspaceBrowserProps, 'renderFactorySlot' | 'useContextMenu' | 'useContextMenuTarget' | 'useWorkspaceAccess'> & {
   folder: WorkspaceFolder
+  workspaceId: WorkspaceId
   expanded: boolean
   /** The folder holds the selected Session. */
   active: boolean
   drop: RowDropTarget | undefined
   onToggle: () => void
+  /** Start a New session inside this folder. */
+  onCreate: () => void
+  /** The New session button's tooltip, the Workspace row's own copy. */
+  createLabel: string
   t: FolderTranslate | undefined
 }) {
   const { getTriggerProps } = useContextMenu()
+  const canCreate = useWorkspaceAccess(workspaceId, 'session/create')
   const target = {
     kind: 'workspaceFolder' as const,
     value: { folderId: folder.id, workspacePath: folder.workspacePath, name: folder.name },
@@ -419,6 +444,18 @@ function FolderRow({
           label: t === undefined ? folder.name : t('folder.actions.aria', { name: folder.name }),
           className: rowCss.iconButton,
         })}
+        {canCreate && t !== undefined && (
+          <Tooltip label={createLabel} side="bottom" align="end" delayMs={500} portal>
+            <button
+              type="button"
+              className={rowCss.iconButton}
+              aria-label={t('folder.newSession.aria', { name: folder.name })}
+              onClick={(event) => { event.stopPropagation(); onCreate() }}
+            >
+              <IconNewChatOutlineRegular size={14} />
+            </button>
+          </Tooltip>
+        )}
       </span>
     </div>
   )
